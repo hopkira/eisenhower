@@ -23,12 +23,15 @@ def unmap(map_x, map_y):
     return round(x), round(y)
 
 class TextBox:
-    def __init__(self, index, x, y, text):
+    def __init__(self, index, importance, urgency, text, due_date):
+        self.importance = importance
+        self.urgency = urgency
+        self.x, self.y = unmap(self.importance, self.urgency)
         self.index = index + 1
-        self.x, self.y = unmap(x, y)
-        self.text = str(self.index) + ". " + text
+        self.text = text
         self.selected = False
         self.deleted = False
+        self.due_date = due_date
 
     def draw(self, canvas):
         # Create a canvas with a white background
@@ -40,16 +43,17 @@ class TextBox:
         self.text_box.insert(tk.END, self.text)
         self.text_box.pack(padx=5, pady=5)
         self.tag = canvas.create_text(self.x, self.y, anchor="nw", text=self.text)
-
         # Bind mouse events to the text box
         self.text_box.bind("<Button-1>", self.on_click)
         self.text_box.bind("<B1-Motion>", self.on_drag)
         self.text_box.bind("<Double-Button-1>", self.delete_box)
+        self.on_click(None)  # Call on_click method to select the text box
 
     def on_click(self, event):
         self.selected = True
-        self.mouse_x = event.x
-        self.mouse_y = event.y
+        if event:
+            self.mouse_x = event.x
+            self.mouse_y = event.y
 
     def on_drag(self, event):
         if self.selected:
@@ -73,9 +77,11 @@ class TextBox:
                 self.y += delta_y
 
             self.canvas.place(x=self.x, y=self.y)
+
+            self.importance, self.urgency = map(self.x, self.y)
             #map_x, map_y = map(self.x, self.y)
             #self.text_box.delete("1.0", tk.END)
-            #self.text_box.insert(tk.END, "({}, {})".format(map_x, map_y))
+            #self.text_box.insert(tk.END, "({}, {})".format(self.importance, self.urgency))
 
     def _update_position(self):
         self.canvas.place(x=self.x, y=self.y)
@@ -101,6 +107,7 @@ class TextBox:
 def quadrant_click(event):
     # Get the location of the mouse click
     x, y = event.x_root, event.y_root
+    importance, urgency = map(x,y)
     
     # Create a new Toplevel window for the dialog box
     dialog = tk.Toplevel(root)
@@ -115,13 +122,42 @@ def quadrant_click(event):
     entry.pack(side="left")
     
     # Create an OK button to close the dialog and retrieve the user input
-    ok_button = tk.Button(dialog, text="OK", command=lambda: dialog.destroy())
+    def ok():
+        nonlocal dialog
+        global box_canvas, text_boxes
+        due_date = '2023-05-01'
+        text = entry.get()
+        index = len(box_canvas)
+        if text:
+            box_canvas.append(tk.Canvas(root, bg="white", width=200, height=200))
+            # print(index, importance, urgency, text)
+            text_boxes.append(TextBox(index, importance, urgency, text, due_date))
+            text_boxes[-1].draw(box_canvas[-1])
+            box_canvas[-1].focus_set()
+        dialog.destroy()
+        root.focus_force()  
+
+    # Create a Cancel button to close the dialog without adding a task
+    def cancel():
+        nonlocal dialog
+        dialog.destroy()
+        root.focus_force()
+
+    # Create an OK button to close the dialog and retrieve the user input
+    ok_button = tk.Button(dialog, text="OK", command=ok)
     ok_button.pack(side="right")
+    cancel_button = tk.Button(dialog, text="Cancel", command=cancel)
+    cancel_button.pack(side="right")
 
     # Bind the Return key to the entry widget to simulate the OK button click
     def enter_pressed(event):
         ok_button.invoke()
     entry.bind('<Return>', enter_pressed)
+
+    # Bind the Escape key to the cancel function
+    def escape_pressed(event):
+        cancel_button.invoke()
+    dialog.bind('<Escape>', escape_pressed)
     
     # Set the geometry of the dialog box relative to the location of the mouse click
     dialog.geometry("+{}+{}".format(x, y))
@@ -184,35 +220,6 @@ t2 = TextBox(50,50,"Some more text that is different")
 t2.draw(box_canvas2)
 '''
 
-# Define a DataFrame with task information
-tasks_df = pd.DataFrame({
-    'Task Name': ['Write a report', 'Book a call', 'Panic','Do a handstand'],
-    'Importance': [80, 50, 70, 90],
-    'Urgency': [90, 60, 40, 10],
-    'Due Date': ['2023-05-01', '2023-05-15', '2023-04-30', '2023-04-30']
-})
-
-# Define the function to create TextBoxes from a DataFrame
-def create_textboxes_from_df(df):
-    num_tasks = len(df)
-    num_cols = 3  # Task Name, Importance, Urgency
-
-    text_boxes = []
-    box_canvas = []
-    # Create a canvas for each task
-    for i in range(num_tasks):
-        box_canvas.append(tk.Canvas(root, bg="white", width=200, height=200))
-        box_canvas[i].grid(row=i // num_cols, column=i % num_cols)
-
-        # Create the TextBox for the task
-        task_name = df.loc[i, 'Task Name']
-        importance = float(df.loc[i, 'Importance'])
-        urgency = float(df.loc[i, 'Urgency'])
-        due_date = df.loc[i, 'Due Date']
-        text = task_name
-        text_boxes.append(TextBox(i, importance, urgency, text))
-        text_boxes[i].draw(box_canvas[i])
-
 def delete_deleted_textboxes(text_boxes, df):
     deleted_indices = []
     for i, text_box in enumerate(text_boxes):
@@ -220,12 +227,111 @@ def delete_deleted_textboxes(text_boxes, df):
             deleted_indices.append(i)
             task_name = df.loc[i, 'Task Name']
             df.drop(i, inplace=True)
-            print(f"Deleted '{task_name}' task.")
+            # print(f"Deleted '{task_name}' task.")
     text_boxes = [text_box for i, text_box in enumerate(text_boxes) if i not in deleted_indices]
 
 
+
+def load_tasks_from_csv(file_path):
+    """
+    Loads tasks DataFrame from a CSV file.
+
+    Parameters:
+        file_path (str): Path of the CSV file to load.
+
+    Returns:
+        pandas.DataFrame: DataFrame containing the tasks information.
+    """
+    try:
+        df = pd.read_csv(file_path)
+        # Check if DataFrame has required columns
+        required_cols = set(['Task Name', 'Importance', 'Urgency', 'Due Date'])
+        if not required_cols.issubset(set(df.columns)):
+            raise ValueError("Missing required columns in CSV file.")
+        # Check if all Importance and Urgency values are numeric
+        if not pd.to_numeric(df['Importance'], errors='coerce').notnull().all():
+            raise ValueError("Importance values should be numeric.")
+        if not pd.to_numeric(df['Urgency'], errors='coerce').notnull().all():
+            raise ValueError("Urgency values should be numeric.")
+        return df
+    except Exception as e:
+        print(f"Error while loading tasks from CSV file: {str(e)}")
+        return None
+
+
+def save_tasks_to_csv(df, file_path):
+    """
+    Saves tasks DataFrame to a CSV file.
+
+    Parameters:
+        df (pandas.DataFrame): DataFrame containing the tasks information.
+        file_path (str): Path of the CSV file to save.
+    """
+    try:
+        # Check if DataFrame has required columns
+        required_cols = set(['Task Name', 'Importance', 'Urgency', 'Due Date'])
+        if not required_cols.issubset(set(df.columns)):
+            raise ValueError("Missing required columns in DataFrame.")
+        # Check if all Importance and Urgency values are numeric
+        if not pd.to_numeric(df['Importance'], errors='coerce').notnull().all():
+            raise ValueError("Importance values should be numeric.")
+        if not pd.to_numeric(df['Urgency'], errors='coerce').notnull().all():
+            raise ValueError("Urgency values should be numeric.")
+        df.to_csv(file_path, index=False)
+        # print(f"Tasks saved to CSV file: {file_path}")
+    except Exception as e:
+        print(f"Error while saving tasks to CSV file: {str(e)}")
+
+df = load_tasks_from_csv('my_tasks.eis')
+
+'''
+# Define a DataFrame with task information
+df = pd.DataFrame({
+    'Task Name': ['Write a report', 'Book a call', 'Panic','Do a handstand'],
+    'Importance': [80, 50, 70, 90],
+    'Urgency': [90, 60, 40, 10],
+    'Due Date': ['2023-05-01', '2023-05-15', '2023-04-30', '2023-04-30']
+})
+'''
+
+def text_boxes_to_df(text_boxes):
+    data = []
+    for box in text_boxes:
+        row = {'Task Name': box.text, 'Importance': box.importance, 'Urgency': box.urgency, 'Due Date': box.due_date}
+        if not box.deleted:
+            data.append(row)
+    new_df = pd.DataFrame(data)
+    return new_df
+
+def save_eisenhower():
+    # print("This function is triggered every minute.")
+    delete_deleted_textboxes(text_boxes, df)
+    my_df = text_boxes_to_df(text_boxes)
+    save_tasks_to_csv(my_df, "my_tasks.eis")
+
+def trigger_function():
+    save_eisenhower()
+    root.after(20000, trigger_function)  # 60000 milliseconds = 1 minute
+
+
 # Create the TextBoxes from the DataFrame
-create_textboxes_from_df(tasks_df)
+# Define the function to create TextBoxes from a DataFrame
+
+text_boxes = []
+box_canvas = []
+# Create a canvas for each task
+for i, task in df.iterrows():
+    box_canvas.append(tk.Canvas(root, bg="white", width=200, height=200))
+    task_name = task['Task Name']
+    importance = float(task['Importance'])
+    urgency = float(task['Urgency'])
+    due_date = task['Due Date']
+    text = task_name
+    text_boxes.append(TextBox(i, importance, urgency, text, due_date))
+    text_boxes[i].draw(box_canvas[i])
+    index = i + 1
+
+root.after(20000, trigger_function)
 
 # Start the main loop
 root.mainloop()
